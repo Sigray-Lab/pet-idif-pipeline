@@ -1,6 +1,6 @@
 # Dynamic PET Imaging Pipeline
 
-Dynamic PET imaging pipeline for brain radiotracer studies. Converts raw DICOM data to NIfTI/BIDS format, performs MR brain segmentation and CT-MR coregistration, extracts time-activity curves, computes SUV and %ID metrics, derives an image-derived input function (IDIF), and fits kinetic models.
+Dynamic PET imaging pipeline for brain radiotracer studies. Converts raw DICOM data to NIfTI/BIDS format, performs MR brain segmentation and CT-MR coregistration, extracts time-activity curves, computes SUV and %ID metrics, derives an image-derived input function (IDIF), and fits kinetic models. The pipeline is template-free and atlas-free: all registrations are image-to-image using the subject's own CT and MR, making it portable across scanners and anatomies without retraining or atlas selection.
 
 ## Requirements
 
@@ -64,8 +64,8 @@ python Scripts/pipeline/run_pipeline.py \
 | Step | Script | Description | Key Outputs |
 |------|--------|-------------|-------------|
 | s00 | `s00_dcm2nii.py` | DICOM to NIfTI conversion, mask copy | 4D PET, CT, MR NIfTIs; frame timing TSV/JSON |
-| s00b | `s00b_segment_mr.py` | CT-guided brain extraction (ICC) | Brain mask in MR space, bias-corrected MR |
-| s00c | `s00c_coregister.py` | CT-MR coregistration, mask resampling | Brain mask in PET space |
+| s00b | `s00b_segment_mr.py` | Experimental automated brain extraction (CT bone thresholding); manual mask recommended | Brain mask in MR space, bias-corrected MR |
+| s00c | `s00c_coregister.py` | Rigid (6 DOF) CT-MR coregistration via ANTs, mask resampling to PET space | Brain mask in PET space |
 | s01 | `s01_extract_tac.py` | Raw brain TAC from whole-brain mask | `tac-raw.tsv`, TAC plot |
 | s02 | `s02_suv_tac.py` | SUV normalization | `tac-suv.tsv`, SUV plot |
 | s03 | `s03_percent_id.py` | %ID calculation + summary | `tac-pctID.tsv`, `summary.tsv` |
@@ -81,6 +81,35 @@ s00 --> s00b --> s00c --> s01 --> s02
 s00 --> s04
               s01 + s04 --> s05
 ```
+
+## Registration and Brain Extraction
+
+This pipeline uses a **template-free, image-to-image** approach. No anatomical atlases, tissue priors, or standard-space templates are required.
+
+### Brain extraction
+
+Traditional MR-based brain extraction tools (e.g., BET in FSL, SPM's unified segmentation) rely on intensity priors or atlas registration that assume specific tissue contrast patterns. These can fail when the MR contrast, resolution, or anatomy deviates from their training data.
+
+This pipeline takes a different approach: the brain mask is **manually drawn** by the user on the coregistered MR-in-CT image, then processed with included utilities (`fill_outline_mask.py` to fill the outlines, `process_manual_wb_mask.py` to resample to PET space). This manual mask is used for all downstream quantification steps. The pipeline also includes an experimental automated extraction step (s00b) that attempts CT bone thresholding and morphological filling, but in practice manual delineation was required for adequate accuracy.
+
+No atlas, template, or tissue prior is needed at any stage.
+
+### Coregistration with ANTs
+
+All spatial transformations use [ANTsPy](https://github.com/ANTsX/ANTsPy), the Python interface to the Advanced Normalization Tools (ANTs) framework. The pipeline uses rigid (6 DOF) registration only, aligning the structural MR to the co-acquired CT based on mutual information.
+
+ANTs is well suited to direct image-to-image registration because its optimization operates on image similarity metrics (mutual information, cross-correlation) rather than requiring pre-segmented tissues or approximate skull stripping as initialization. This makes it robust across different field strengths, resolutions, and subject anatomies.
+
+The rigid transform is computed once (in step s00b) and reused by downstream steps (s00c) to resample masks between CT, MR, and PET spaces.
+
+### Portability
+
+Because the pipeline requires only:
+- A co-acquired CT (for brain extraction)
+- A structural MR (for tissue contrast)
+- A dynamic PET acquisition
+
+it works for any scanner, any species, and any brain size without modification. The configurable parameters in `config.py` (CT crop bounds, bone threshold, morphological iterations) can be adjusted for different imaging protocols.
 
 ## Frame Protocol
 
